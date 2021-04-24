@@ -151,6 +151,8 @@
     <string name="timeout_answer_seconds_summ" comment="The time to wait (in seconds) in the reviewer before automatically showing the next question or answer">XXX s</string>
     <string name="timeout_question_seconds">Temps avant de montrer la question suivante</string>
     <string name="select_locale_title">Sélectionnez la langue</string>
+    <string name="software_render">Désactiver le rendu matériel de carte</string>
+    <string name="software_render_summ">Le rendu matériel est plus rapide mais peut rencontrer des problèmes, en particulier sur Android 8/8.1. Si vous ne pouvez pas visualiser certaines parties de l\'interface de révision des cartes, essayez d\'activer cette option.</string>
     <string name="safe_display">Mode d’affichage protégé</string>
     <string name="safe_display_summ">Désactiver toutes les animations et utiliser le mode sécurisé pour afficher les cartes. Les appareils à encre électronique peuvent nécessiter ceci.</string>
     <string name="disable_extended_text_ui">Désactiver le mode d\'édition à champ unique</string>
@@ -162,7 +164,7 @@
     <string name="show_estimates">Afficher le temps</string>
     <string name="show_estimates_summ">Afficher le temps avant la prochaine révision sur les boutons de réponse</string>
     <string name="show_top_bar">Afficher la barre supérieure</string>
-    <string name="show_top_bar_summ">Afficher le nombre de cartes, le marqueur et la marque dans la barre supérieure</string>
+    <string name="show_top_bar_summ">Afficher le nombre de cartes, la balise et la marque dans la barre supérieure</string>
     <string name="show_progress">Afficher le nombre restant de révision</string>
     <string name="show_progress_summ">Montrer le nombre de cartes restantes</string>
     <string name="show_eta">Afficher le temps restant</string>
@@ -172,7 +174,8 @@
     <string name="learn_cutoff">Limite d’apprentissage</string>
     <string name="time_limit">Limite de temps</string>
     <string name="time_limit_summ">XXX min</string>
-    <string name="day_offset">Début du jour suivant</string>
+    <string name="new_timezone">Nouvelle gestion du fuseau horaire</string>
+    <string name="day_offset_with_description">Début du jour suivant (0 est minuit, 23 est 23 h)</string>
     <string name="day_offset_summ">XXX heures après minuit</string>
     <string name="sched_ver">Planificateur V2 expérimental</string>
     <string name="sched_ver_summ">Activer le planificateur expérimental. Force les changements dans un sens lors de la prochaine synchronisation</string>
@@ -287,5 +290,9 @@
     <string name="note_editor_replace_newlines">Remplacer les nouvelles lignes par du HTML</string>
     <string name="note_editor_replace_newlines_summ">Dans l\'éditeur de notes, convertissez toutes les instances de &lt;br&gt; en nouvelles lignes lors de l\'édition d\'une carte.</string>
     <string name="no_code_formatting">Formatage simple des réponses saisies</string>
-    <string name="no_code_formatting_summ">Fixe « &lt;unk&gt; » dans les résultats des types de réponses</string>
+    <string name="no_code_formatting_summ">Corrige ‘􏿾’ apparaissant dans les résultats de réponse saisie</string>
+    <string name="type_in_answer_focus">Mettre en évidence « Saisir la réponse »</string>
+    <string name="type_in_answer_focus_summ">Mettre automatiquement en évidence le champ « Saisir la réponse » dans le vérificateur</string>
+    <!-- Open Changelog-->
+    <string name="open_changelog">Ouvrir le journal des modifications</string>
 </resources>

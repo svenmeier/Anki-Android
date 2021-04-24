@@ -31,6 +31,7 @@ import com.ichi2.libanki.DeckConfig;
 import com.ichi2.libanki.Model;
 import com.ichi2.libanki.Models;
 import com.ichi2.libanki.Note;
+import com.ichi2.testutils.MockTime;
 import com.ichi2.testutils.MutableTime;
 import com.ichi2.utils.JSONArray;
 import com.ichi2.utils.JSONObject;
@@ -185,7 +186,7 @@ public class SchedTest extends RobolectricTest {
 
     @Test
     public void testRevLogValues() {
-        MutableTime time = new MutableTime(1596540139123L, 10);
+        MutableTime time = new MutableTime(MockTime.timeStamp(2020, 8, 4, 11, 22, 19, 123), 10);
         Collection col =  CollectionHelper.getInstance().getCol(getTargetContext(), time);
         addNoteUsingBasicModel("Hello", "World");
 
@@ -267,7 +268,7 @@ public class SchedTest extends RobolectricTest {
     public void test_newLimits_V1() throws Exception {
         Collection col = getColV1();
         // add some notes
-        long deck2 = col.getDecks().id("Default::foo");
+        long deck2 = addDeck("Default::foo");
         Note note;
         for (int i = 0; i < 30; i++) {
             note = col.newNote();
@@ -785,7 +786,7 @@ public class SchedTest extends RobolectricTest {
         // should cope with cards in cram decks
         c.setDue(1);
         c.flush();
-        col.getDecks().newDyn("tmp");
+        addDynamicDeck("tmp");
         col.getSched().rebuildDyn();
         c.load();
         assertNotEquals(1, c.getDue());
@@ -817,7 +818,7 @@ public class SchedTest extends RobolectricTest {
         assertEquals(new Counts(0, 0, 0), col.getSched().counts());
         Card cardcopy = c.clone();
         // create a dynamic deck and refresh it
-        long did = col.getDecks().newDyn("Cram");
+        long did = addDynamicDeck("Cram");
         col.getSched().rebuildDyn(did);
         col.reset();
         // should appear as new in the deck list
@@ -888,7 +889,7 @@ public class SchedTest extends RobolectricTest {
         col.reset();
         assertEquals(new Counts(0, 0, 1), col.getSched().counts());
         // cram again
-        did = col.getDecks().newDyn("Cram");
+        did = addDynamicDeck("Cram");
         col.getSched().rebuildDyn(did);
         col.reset();
         assertEquals(new Counts(0, 0, 1), col.getSched().counts());
@@ -915,7 +916,7 @@ public class SchedTest extends RobolectricTest {
         note.setItem("Front", "one");
         col.addNote(note);
         long oldDue = note.cards().get(0).getDue();
-        long did = col.getDecks().newDyn("Cram");
+        long did = addDynamicDeck("Cram");
         col.getSched().rebuildDyn(did);
         col.reset();
         Card c = getCard();
@@ -941,7 +942,7 @@ public class SchedTest extends RobolectricTest {
         note.setItem("Front", "one");
         col.addNote(note);
         // cram deck
-        long did = col.getDecks().newDyn("Cram");
+        long did = addDynamicDeck("Cram");
         Deck cram = col.getDecks().get(did);
         cram.put("resched", false);
         col.getDecks().save(cram);
@@ -1229,7 +1230,7 @@ public class SchedTest extends RobolectricTest {
         // and one that's a child
         note = col.newNote();
         note.setItem("Front", "two");
-        long default1 = col.getDecks().id("Default::1");
+        long default1 = addDeck("Default::1");
         note.model().put("did", default1);
         col.addNote(note);
         // make it a review card
@@ -1240,12 +1241,12 @@ public class SchedTest extends RobolectricTest {
         // add one more with a new deck
         note = col.newNote();
         note.setItem("Front", "two");
-        JSONObject foobar = note.model().put("did", col.getDecks().id("foo::bar"));
+        JSONObject foobar = note.model().put("did", addDeck("foo::bar"));
         col.addNote(note);
         // and one that's a sibling
         note = col.newNote();
         note.setItem("Front", "three");
-        JSONObject foobaz = note.model().put("did", col.getDecks().id("foo::baz"));
+        JSONObject foobaz = note.model().put("did", addDeck("foo::baz"));
         col.addNote(note);
         col.reset();
         assertEquals(5, col.getDecks().allSortedNames().size());
@@ -1278,12 +1279,12 @@ public class SchedTest extends RobolectricTest {
         // and one that's a child
         note = col.newNote();
         note.setItem("Front", "two");
-        JSONObject default1 = note.model().put("did", col.getDecks().id("Default::2"));
+        JSONObject default1 = note.model().put("did", addDeck("Default::2"));
         col.addNote(note);
         // and another that's higher up
         note = col.newNote();
         note.setItem("Front", "three");
-        default1 = note.model().put("did", col.getDecks().id("Default::1"));
+        default1 = note.model().put("did", addDeck("Default::1"));
         col.addNote(note);
         // should get top level one first, then ::1, then ::2
         col.reset();

@@ -29,6 +29,8 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.SystemClock;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.CheckResult;
 import androidx.annotation.NonNull;
 import com.google.android.material.snackbar.Snackbar;
@@ -111,7 +113,7 @@ import static com.ichi2.libanki.stats.Stats.SECONDS_PER_DAY;
 import static com.ichi2.anim.ActivityTransitionAnimation.Direction.*;
 
 public class CardBrowser extends NavigationDrawerActivity implements
-        DeckDropDownAdapter.SubtitleListener {
+        DeckDropDownAdapter.SubtitleListener, TagsDialog.TagsDialogListener {
 
     enum Column {
         QUESTION,
@@ -139,7 +141,7 @@ public class CardBrowser extends NavigationDrawerActivity implements
     * When the list is changed, the position member of its elements should get changed.*/
     @NonNull
     private CardCollection<CardCache> mCards = new CardCollection<>();
-    private ArrayList<Deck> mDropDownDecks;
+    private List<Deck> mDropDownDecks;
     private ListView mCardsListView;
     private SearchView mSearchView;
     private MultiColumnListAdapter mCardsAdapter;
@@ -170,7 +172,23 @@ public class CardBrowser extends NavigationDrawerActivity implements
 
     private static final int EDIT_CARD = 0;
     private static final int ADD_NOTE = 1;
-    private static final int PREVIEW_CARDS = 2;
+
+    ActivityResultLauncher<Intent> mOnPreviewCardsActivityResult = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+        Timber.d("onPreviewCardsActivityResult: resultCode=%d", result.getResultCode());
+        if (result.getResultCode() == DeckPicker.RESULT_DB_ERROR) {
+            closeCardBrowser(DeckPicker.RESULT_DB_ERROR);
+        }
+        // Previewing can now perform an "edit", so it can pass on a reloadRequired
+        Intent data = result.getData();
+        if (data != null &&
+                (data.getBooleanExtra("reloadRequired", false) || data.getBooleanExtra("noteChanged", false))) {
+            searchCards();
+            if (getReviewerCardId() == mCurrentCardId) {
+                mReloadRequired = true;
+            }
+        }
+        invalidateOptionsMenu();    // maybe the availability of undo changed
+    });
 
     private static final int DEFAULT_FONT_SIZE_RATIO = 100;
     // Should match order of R.array.card_browser_order_labels
@@ -241,7 +259,7 @@ public class CardBrowser extends NavigationDrawerActivity implements
                 return true;
             };
 
-
+    @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED)
     protected void changeCardOrder(int which) {
         if (which != mOrder) {
             mOrder = which;
@@ -267,6 +285,8 @@ public class CardBrowser extends NavigationDrawerActivity implements
             mCards.reverse();
             updateList();
         }
+        // To update the collection
+        getCol().getDb().setMod(true);
     }
 
 
@@ -665,17 +685,31 @@ public class CardBrowser extends NavigationDrawerActivity implements
                 openNoteEditorForCard(clickedCardId);
             }
         });
-        mCardsListView.setOnItemLongClickListener((adapterView, view, position, id) -> {
-            mLastSelectedPosition = position;
-            saveScrollingState(position);
-            loadMultiSelectMode();
 
-            // click on whole cell triggers select
-            CheckBox cb = view.findViewById(R.id.card_checkbox);
-            cb.toggle();
-            onCheck(position, view);
-            recenterListView(view);
-            mCardsAdapter.notifyDataSetChanged();
+        mCardsListView.setOnItemLongClickListener((adapterView, view, position, id) -> {
+            if (mInMultiSelectMode) {
+                boolean hasChanged = false;
+                for (int i = Math.min(mLastSelectedPosition, position); i <= Math.max(mLastSelectedPosition, position); i++) {
+                    CardCache card = (CardCache) mCardsListView.getItemAtPosition(i);
+
+                    // Add to the set of checked cards
+                    hasChanged |= mCheckedCards.add(card);
+                }
+                if (hasChanged) {
+                    onSelectionChanged();
+                }
+            } else {
+                mLastSelectedPosition = position;
+                saveScrollingState(position);
+                loadMultiSelectMode();
+
+                // click on whole cell triggers select
+                CheckBox cb = view.findViewById(R.id.card_checkbox);
+                cb.toggle();
+                onCheck(position, view);
+                recenterListView(view);
+                mCardsAdapter.notifyDataSetChanged();
+            }
             return true;
         });
 
@@ -777,7 +811,7 @@ public class CardBrowser extends NavigationDrawerActivity implements
         Intent editCard = new Intent(this, NoteEditor.class);
         editCard.putExtra(NoteEditor.EXTRA_CALLER, NoteEditor.CALLER_CARDBROWSER_EDIT);
         editCard.putExtra(NoteEditor.EXTRA_CARD_ID, sCardBrowserCard.getId());
-        startActivityForResultWithAnimation(editCard, EDIT_CARD, LEFT);
+        startActivityForResultWithAnimation(editCard, EDIT_CARD, START);
         //#6432 - FIXME - onCreateOptionsMenu crashes if receiving an activity result from edit card when in multiselect
         endMultiSelectMode();
     }
@@ -1236,7 +1270,7 @@ public class CardBrowser extends NavigationDrawerActivity implements
 
     protected void onPreview() {
         Intent previewer = getPreviewIntent();
-        startActivityForResultWithoutAnimation(previewer, PREVIEW_CARDS);
+        mOnPreviewCardsActivityResult.launch(previewer);
     }
 
 
@@ -1305,7 +1339,7 @@ public class CardBrowser extends NavigationDrawerActivity implements
             try {
                 arrayAdapter.add(deck.getString("name"));
             } catch (JSONException e) {
-                e.printStackTrace();
+                Timber.w(e);
             }
         }
 
@@ -1323,11 +1357,12 @@ public class CardBrowser extends NavigationDrawerActivity implements
         if (did != null && did > 0) {
             intent.putExtra(NoteEditor.EXTRA_DID, (long) did);
         }
+        intent.putExtra(NoteEditor.EXTRA_TEXT_FROM_SEARCH_VIEW, mSearchTerms);
         return intent;
     }
 
     private void addNoteFromCardBrowser() {
-        startActivityForResultWithAnimation(getAddNoteIntent(), ADD_NOTE, LEFT);
+        startActivityForResultWithAnimation(getAddNoteIntent(), ADD_NOTE, START);
     }
 
 
@@ -1351,15 +1386,6 @@ public class CardBrowser extends NavigationDrawerActivity implements
                 searchCards();
             } else {
                 Timber.w("Note was added from browser and on return mSearchView == null");
-            }
-        }
-
-        // Previewing can now perform an "edit", so it can pass on a reloadRequired
-        if (requestCode == PREVIEW_CARDS && data != null
-                && (data.getBooleanExtra("reloadRequired", false) || data.getBooleanExtra("noteChanged", false))) {
-            searchCards();
-            if (getReviewerCardId() == mCurrentCardId) {
-                mReloadRequired = true;
             }
         }
 
@@ -1396,8 +1422,7 @@ public class CardBrowser extends NavigationDrawerActivity implements
 
     private void showTagsDialog() {
         TagsDialog dialog = TagsDialog.newInstance(
-                TagsDialog.TYPE_FILTER_BY_TAG, new ArrayList<>(0), new ArrayList<>(getCol().getTags().all()));
-        dialog.setTagsDialogListener(this::filterByTag);
+                TagsDialog.DialogType.FILTER_BY_TAG, new ArrayList<>(0), new ArrayList<>(getCol().getTags().all()));
         showDialogFragment(dialog);
     }
 
@@ -1444,6 +1469,8 @@ public class CardBrowser extends NavigationDrawerActivity implements
         savedInstanceState.putInt("mOldCardTopOffset", mOldCardTopOffset);
         savedInstanceState.putBoolean("mShouldRestoreScroll", mShouldRestoreScroll);
         savedInstanceState.putBoolean("mPostAutoScroll", mPostAutoScroll);
+        savedInstanceState.putInt("mLastSelectedPosition", mLastSelectedPosition);
+        savedInstanceState.putBoolean("mInMultiSelectMode", mInMultiSelectMode);
         super.onSaveInstanceState(savedInstanceState);
     }
 
@@ -1455,6 +1482,8 @@ public class CardBrowser extends NavigationDrawerActivity implements
         mOldCardTopOffset = savedInstanceState.getInt("mOldCardTopOffset");
         mShouldRestoreScroll = savedInstanceState.getBoolean("mShouldRestoreScroll");
         mPostAutoScroll = savedInstanceState.getBoolean("mPostAutoScroll");
+        mLastSelectedPosition = savedInstanceState.getInt("mLastSelectedPosition");
+        mInMultiSelectMode = savedInstanceState.getBoolean("mInMultiSelectMode");
         searchCards();
     }
 
@@ -1484,9 +1513,12 @@ public class CardBrowser extends NavigationDrawerActivity implements
             mSearchItem.expandActionView();
         }
         if (mSearchTerms.contains("deck:")) {
-            searchText = mSearchTerms;
+            searchText = "(" + mSearchTerms + ")";
         } else {
-            searchText = mRestrictOnDeck + mSearchTerms;
+            if (!"".equals(mSearchTerms))
+                searchText = mRestrictOnDeck + "(" + mSearchTerms + ")";
+            else
+                searchText = mRestrictOnDeck;
         }
         if (colIsOpen() && mCardsAdapter!= null) {
             // clear the existing card list
@@ -1563,8 +1595,9 @@ public class CardBrowser extends NavigationDrawerActivity implements
     }
 
 
-    private void filterByTag(List<String> selectedTags, int option) {
-        //TODO: Duplication between here and CustomStudyDialog:customStudyFromTags
+    @Override
+    public void onSelectedTags(List<String> selectedTags, int option) {
+        //TODO: Duplication between here and CustomStudyDialog:onSelectedTags
         mSearchView.setQuery("", false);
         String tags = selectedTags.toString();
         mSearchView.setQueryHint(getResources().getString(R.string.CardEditorTags,
@@ -2156,7 +2189,7 @@ public class CardBrowser extends NavigationDrawerActivity implements
     private void closeCardBrowser(int result, Intent data) {
         // Set result and finish
         setResult(result, data);
-        finishWithAnimation(RIGHT);
+        finishWithAnimation(END);
     }
 
     /**
@@ -2318,7 +2351,7 @@ public class CardBrowser extends NavigationDrawerActivity implements
 
 
         @Override
-        public Object getItem(int position) {
+        public CardCache getItem(int position) {
             return getCards().get(position);
         }
 
@@ -2858,7 +2891,7 @@ public class CardBrowser extends NavigationDrawerActivity implements
 
     @VisibleForTesting
     void filterByTag(String... tags) {
-        filterByTag(Arrays.asList(tags), 0);
+        onSelectedTags(Arrays.asList(tags), 0);
     }
 
     @VisibleForTesting
@@ -2871,5 +2904,11 @@ public class CardBrowser extends NavigationDrawerActivity implements
     void replaceSelectionWith(int[] positions) {
         mCheckedCards.clear();
         checkCardsAtPositions(positions);
+    }
+
+    @VisibleForTesting
+    void searchCards(String searchQuery) {
+        mSearchTerms = searchQuery;
+        searchCards();
     }
 }

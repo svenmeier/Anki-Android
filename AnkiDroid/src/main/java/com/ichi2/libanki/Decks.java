@@ -27,13 +27,15 @@ import android.text.TextUtils;
 import com.ichi2.anki.AnkiDroidApp;
 import com.ichi2.anki.exception.ConfirmModSchemaException;
 import com.ichi2.anki.exception.DeckRenameException;
-import com.ichi2.libanki.exception.NoSuchDeckException;
+import com.ichi2.anki.exception.FilteredAncestor;
 
 import com.ichi2.utils.DeckComparator;
 import com.ichi2.utils.DeckNameComparator;
 import com.ichi2.utils.JSONArray;
 import com.ichi2.utils.JSONObject;
 import com.ichi2.utils.SyncStatus;
+
+import net.ankiweb.rsdroid.RustCleanup;
 
 import java.text.Normalizer;
 import java.util.ArrayList;
@@ -44,7 +46,6 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
@@ -55,7 +56,6 @@ import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 import timber.log.Timber;
 
-import static com.ichi2.libanki.Consts.DECK_DYN;
 import static com.ichi2.libanki.Consts.DECK_STD;
 import static com.ichi2.utils.CollectionUtils.addAll;
 
@@ -74,7 +74,7 @@ public class Decks {
     @SuppressWarnings("WeakerAccess")
     public static final String DECK_SEPARATOR = "::";
 
-    public static final String defaultDeck = ""
+    public static final String DEFAULT_DECK = ""
             + "{"
                 + "'newToday': [0, 0]," // currentDay, count
                 + "'revToday': [0, 0],"
@@ -108,7 +108,7 @@ public class Decks {
                 + "'return': True" // currently unused
             + "}";
 
-    public static final String defaultConf = ""
+    public static final String DEFAULT_CONF = ""
             + "{"
                 + "'name': \"Default\","
                 + "'new': {"
@@ -155,13 +155,28 @@ public class Decks {
     private NameMap mNameMap;
     private boolean mChanged;
 
+
+
+    /**
+     * A tool to quickly access decks from name. Ensure that names get properly normalized so that difference in
+     * name unicode normalization or upper/lower case, is ignored during deck search.
+     */
     private static class NameMap {
         private final HashMap<String, Deck> mNameMap;
 
+
+        /**
+         * @param size The expected number of deck to keep
+         */
         private NameMap(int size) {
             mNameMap = new HashMap<>(size);
         }
 
+
+        /**
+         * @param decks The collection of decks we want to get access quickly
+         * @return A name map, allowing to get decks from name
+         */
         public static NameMap constructor(java.util.Collection<Deck> decks) {
             NameMap map = new NameMap(2 * decks.size());
             for (Deck deck: decks) {
@@ -170,6 +185,11 @@ public class Decks {
             return map;
         }
 
+
+        /**
+         * @param name A name of deck to get
+         * @return The deck with this name if it exists, null otherwise.
+         */
         public synchronized Deck get(String name) {
             String normalized = normalizeName(name);
             Deck deck = mNameMap.get(normalized);
@@ -183,6 +203,10 @@ public class Decks {
             return deck;
         }
 
+
+        /**
+         * @param g Add a deck. Allow from its name to get quick access to the deck.
+         */
         public synchronized void add(Deck g) {
             String name = g.getString("name");
             mNameMap.put(name, g);
@@ -291,40 +315,54 @@ public class Decks {
      * ***********************************************************
      */
 
-    public Long id(String name) {
-        return id(name, true);
-    }
-
-
-    public Long id(String name, boolean create) {
-        return id(name, create, defaultDeck);
-    }
-
-
-    public Long id(String name, String type) {
-        return id(name, true, type);
-    }
-
-
-    /**
-     * Add a deck with NAME. Reuse deck if already exists. Return id as int.
-     */
-    public Long id(String name, boolean create, String type) {
-        name = strip(name);
-        name = name.replace("\"", "");
-        name = Normalizer.normalize(name, Normalizer.Form.NFC);
+    public Long id_for_name(String name) {
+        name = usable_name(name);
         Deck deck = byName(name);
         if (deck != null) {
             return deck.getLong("id");
         }
-        if (!create) {
-            return null;
+        return null;
+    }
+
+    public Long id(String name) throws FilteredAncestor {
+        return id(name, DEFAULT_DECK);
+    }
+
+    public Long id_safe(String name) {
+        return id_safe(name, DEFAULT_DECK);
+    }
+
+    private String usable_name(String name) {
+        name = strip(name);
+        name = name.replace("\"", "");
+        name = Normalizer.normalize(name, Normalizer.Form.NFC);
+        return name;
+    }
+
+    /**
+     * Add a deck with NAME. Reuse deck if already exists. Return id as int.
+     */
+    public Long id(String name, String type) throws FilteredAncestor {
+        name = usable_name(name);
+        Long id = id_for_name(name);
+        if (id != null) {
+            return id;
         }
         if (name.contains("::")) {
             // not top level; ensure all parents exist
             name = _ensureParents(name);
         }
-        long id;
+        return id_create_name_valid(name, type);
+    }
+
+
+    /**
+     * @param name A name, assuming it's not a deck name, all ancestors exists and are not filtered
+     * @param type The json encoding of the deck, except for name and id
+     * @return the deck's id
+     */
+    private Long id_create_name_valid(String name, String type) {
+        Long id;
         Deck g = new Deck(type);
         g.put("name", name);
         do {
@@ -337,6 +375,23 @@ public class Decks {
         mNameMap.add(g);
         //runHook("newDeck"); // TODO
         return id;
+    }
+
+
+    /**
+     * Same as id, but rename ancestors if filtered to avoid failure
+     */
+    public Long id_safe(String name, String type)  {
+        name = usable_name(name);
+        Long id = id_for_name(name);
+        if (id != null) {
+            return id;
+        }
+        if (name.contains("::")) {
+            // not top level; ensure all parents exist
+            name = _ensureParentsNotFiltered(name);
+        }
+        return id_create_name_valid(name, type);
     }
 
 
@@ -354,7 +409,7 @@ public class Decks {
      * Remove the deck. If cardsToo, delete any cards inside.
      */
     public void rem(long did, boolean cardsToo, boolean childrenToo) {
-        JSONObject deck = get(did, false);
+        Deck deck = get(did, false);
         if (did == 1) {
             // we won't allow the default deck to be deleted, but if it's a
             // child of an existing deck then it needs to be renamed
@@ -370,7 +425,7 @@ public class Decks {
         if (deck == null) {
             return;
         }
-        if (deck.getInt("dyn") == DECK_DYN) {
+        if (deck.isDyn()) {
             // deleting a cramming deck returns cards to their previous deck
             // rather than deleting the cards
             mCol.getSched().emptyDyn(did);
@@ -405,7 +460,7 @@ public class Decks {
     }
 
 
-    public ArrayList<String> allNames() {
+    public List<String> allNames() {
         return allNames(true);
     }
 
@@ -413,15 +468,15 @@ public class Decks {
     /**
      * An unsorted list of all deck names.
      */
-    public ArrayList<String> allNames(boolean dyn) {
-        ArrayList<String> list = new ArrayList<>(mDecks.size());
+    public List<String> allNames(boolean dyn) {
+        List<String> list = new ArrayList<>(mDecks.size());
         if (dyn) {
             for (Deck x : mDecks.values()) {
                 list.add(x.getString("name"));
             }
         } else {
             for (Deck x : mDecks.values()) {
-                if (x.getInt("dyn") == DECK_STD) {
+                if (x.isStd()) {
                     list.add(x.getString("name"));
                 }
             }
@@ -433,7 +488,7 @@ public class Decks {
     /**
      * A list of all decks.
      */
-    public ArrayList<Deck> all() {
+    public List<Deck> all() {
         return new ArrayList<>(mDecks.values());
     }
 
@@ -445,16 +500,16 @@ public class Decks {
      * This method does not exist in the original python module but *must* be used for any user
      * interface components that display a deck list to ensure the ordering is consistent.
      */
-    public ArrayList<Deck> allSorted() {
-        ArrayList<Deck> decks = all();
-        Collections.sort(decks, DeckComparator.instance);
+    public List<Deck> allSorted() {
+        List<Deck> decks = all();
+        Collections.sort(decks, DeckComparator.INSTANCE);
         return decks;
     }
 
     @VisibleForTesting
     public List<String> allSortedNames() {
         List<String> names = allNames();
-        Collections.sort(names, DeckNameComparator.instance);
+        Collections.sort(names, DeckNameComparator.INSTANCE);
         return names;
     }
 
@@ -549,15 +604,11 @@ public class Decks {
              * did not change. We still need to run the remaining of
              * the code in order do this change. */
         }
-        // ensure we have parents
-        newName = _ensureParents(newName);
-        // make sure we're not nesting under a filtered deck
-        if (newName.contains("::")) {
-            List<String> parts = Arrays.asList(path(newName));
-            String newParent = TextUtils.join("::", parts.subList(0, parts.size() - 1));
-            if (byName(newParent).getInt("dyn") == DECK_DYN) {
-                throw new DeckRenameException(DeckRenameException.FILTERED_NOSUBDEKCS);
-            }
+        // ensure we have parents and none is a filtered deck
+        try {
+            newName = _ensureParents(newName);
+        } catch (FilteredAncestor filteredSubdeck) {
+            throw new DeckRenameException(DeckRenameException.FILTERED_NOSUBDECKS);
         }
         // rename children
         String oldName = g.getString("name");
@@ -576,7 +627,8 @@ public class Decks {
         // adjust name
         g.put("name", newName);
         // ensure we have parents again, as we may have renamed parent->child
-        newName = _ensureParents(newName);
+        // No ancestor can be filtered after renaming
+        newName = _ensureParentsNotFiltered(newName);
         mNameMap.add(g);
         save(g);
         // renaming may have altered active did order
@@ -661,9 +713,13 @@ public class Decks {
 
 
     /**
-     * Ensure parents exist, and return name with case matching parents.
+     *
+     * @param name The name whose parents should exists
+     * @return The name, with potentially change in capitalization and unicode normalization, so that the parent's name corresponds to an existing deck.
+     * @throws FilteredAncestor if a parent is filtered
      */
-    public String _ensureParents(String name) {
+    @VisibleForTesting
+    protected String _ensureParents(String name) throws FilteredAncestor {
         String s = "";
         String[] path = path(name);
         if (path.length < 2) {
@@ -680,6 +736,47 @@ public class Decks {
             long did = id(s);
             // get original case
             s = name(did);
+            Deck deck = get(did);
+            if (deck.isDyn()) {
+                throw new FilteredAncestor(s);
+            }
+        }
+        name = s + "::" + path[path.length - 1];
+        return name;
+    }
+
+
+    /**
+     * Similar as ensure parent, to use when the method can't fail and it's better to allow more change to ancestor's names.
+     * @param name The name whose parents should exists
+     * @return The name similar to input, changed as required, and as little as required, so that no ancestor is filtered and the parent's name is an existing deck.
+     */
+    @VisibleForTesting
+    protected  String _ensureParentsNotFiltered(String name) {
+        String s = "";
+        String[] path = path(name);
+        if (path.length < 2) {
+            return name;
+        }
+        for(int i = 0; i < path.length - 1; i++) {
+            String p = path[i];
+            if (TextUtils.isEmpty(s)) {
+                s += p;
+            } else {
+                s += "::" + p;
+            }
+            long did = id_safe(s);
+            Deck deck = get(did);
+            s = name(did);
+            while (deck.isDyn()) {
+                s = s + "'";
+                // fetch or create
+                did = id_safe(s);
+                // get original case
+                s = name(did);
+                deck = get(did);
+
+            }
         }
         name = s + "::" + path[path.length - 1];
         return name;
@@ -705,6 +802,10 @@ public class Decks {
         assert deck != null;
         if (deck.has("conf")) {
             DeckConfig conf = getConf(deck.getLong("conf"));
+            if (conf == null) {
+                // fall back on default
+                conf = getConf(1L);
+            }
             conf.put("dyn", DECK_STD);
             return conf;
         }
@@ -725,7 +826,7 @@ public class Decks {
 
 
     public long confId(String name) {
-        return confId(name, defaultConf);
+        return confId(name, DEFAULT_CONF);
     }
 
 
@@ -786,11 +887,11 @@ public class Decks {
 
     public void restoreToDefault(DeckConfig conf) {
         int oldOrder = conf.getJSONObject("new").getInt("order");
-        DeckConfig _new = new DeckConfig(defaultConf);
+        DeckConfig _new = mCol.getBackend().new_deck_config_legacy();
         _new.put("id", conf.getLong("id"));
         _new.put("name", conf.getString("name"));
-        mDconf.put(conf.getLong("id"), _new);
-        save(_new);
+
+        updateConf(_new);
         // if it was previously randomized, resort
         if (oldOrder == 0) {
             mCol.getSched().resortConf(_new);
@@ -875,7 +976,7 @@ public class Decks {
     }
 
     private void _checkDeckTree() {
-        ArrayList<Deck> decks = allSorted();
+        List<Deck> decks = allSorted();
         Map<String, Deck> names = new HashMap<>(decks.size());
 
         for (Deck deck: decks) {
@@ -934,7 +1035,7 @@ public class Decks {
             if (immediateParent != null && !names.containsKey(normalizeName(immediateParent))) {
                 Timber.i("fix deck with missing parent %s", deckName);
                 Deck parent = byName(immediateParent);
-                _ensureParents(deckName);
+                _ensureParentsNotFiltered(deckName);
                 names.put(normalizeName(immediateParent), parent);
             }
             names.put(normalizeName(deckName), deck);
@@ -984,7 +1085,7 @@ public class Decks {
         String name = mDecks.get(did).getString("name");
 
         // current deck
-        mCol.getConf().put("curDeck", Long.toString(did));
+        mCol.getConf().put("curDeck", did);
         // and active decks (current + all children)
         TreeMap<String, Long> actv = children(did); // Note: TreeMap is already sorted
         actv.put(name, did);
@@ -1036,9 +1137,9 @@ public class Decks {
         Node childMap = new Node();
 
         // Go through all decks, sorted by name
-        ArrayList<Deck> decks = all();
+        List<Deck> decks = all();
 
-        Collections.sort(decks, DeckComparator.instance);
+        Collections.sort(decks, DeckComparator.INSTANCE);
 
         for (Deck deck : decks) {
             Node node = new Node();
@@ -1115,7 +1216,7 @@ public class Decks {
     /**
      * Return a new dynamic deck and set it as the current deck.
      */
-    public long newDyn(String name) {
+    public long newDyn(String name) throws FilteredAncestor {
         long did = id(name, defaultDynamicDeck);
         select(did);
         return did;
@@ -1123,7 +1224,7 @@ public class Decks {
 
 
     public boolean isDyn(long did) {
-        return get(did).getInt("dyn") == DECK_DYN;
+        return get(did).isDyn();
     }
 
     /*
@@ -1174,7 +1275,8 @@ public class Decks {
         return current().optString("desc","");
     }
 
-
+    @Deprecated
+    @RustCleanup("This exists in Rust as DecksDictProxy, but its usage is warned against")
     public HashMap<Long, Deck> getDecks() {
         return mDecks;
     }
@@ -1190,29 +1292,12 @@ public class Decks {
         return validValues.toArray(new Long[0]);
     }
 
-    private Deck getDeckOrFail(long deckId) throws NoSuchDeckException {
-        Deck deck = get(deckId, false);
-        if (deck == null) {
-            throw new NoSuchDeckException(deckId);
-        }
-        return deck;
-    }
-
-    public boolean hasDeckOptions(long deckId) throws NoSuchDeckException {
-        return getDeckOrFail(deckId).has("conf");
-    }
-
-
-    public void removeDeckOptions(long deckId) throws NoSuchDeckException {
-        getDeckOrFail(deckId).remove("conf");
-    }
-
     public static boolean isDynamic(Collection col, long deckId) {
         return Decks.isDynamic(col.getDecks().get(deckId));
     }
 
     public static boolean isDynamic(Deck deck) {
-        return deck.getInt("dyn") == DECK_DYN;
+        return deck.isDyn();
     }
 
     /** Retruns the fully qualified name of the subdeck, or null if unavailable */

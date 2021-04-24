@@ -58,7 +58,7 @@
     <string name="logged_as">Connesso come</string>
     <string name="log_out">Esci</string>
     <string name="alert_logging_message">Accesso in corso, attendi...</string>
-    <string name="invalid_username_password">Indirizzo email o password errati</string>
+    <string name="invalid_username_password">Indirizzo di posta elettronica o password errati</string>
     <string name="reset_password">Reimposta la password</string>
     <!-- AndroidManifest.xml -->
     <string name="preferences_title">Preferenze</string>
@@ -128,5 +128,5 @@
     <!-- Deck Picker Sync Icon -->
     <string name="sync_menu_title_full_sync">Sincronizza (tutto)</string>
     <string name="sync_menu_title_no_account">Sincronizza (login)</string>
-    <string name="sync_error_unknown_host_readable">Could not connect to AnkiWeb. Is your internet working?\n\n%s</string>
+    <string name="sync_error_unknown_host_readable">Impossibile connettersi ad AnkiWeb. Funziona la conessione internet?\n\n%s</string>
 </resources>

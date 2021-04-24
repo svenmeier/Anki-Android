@@ -151,6 +151,8 @@
     <string name="timeout_answer_seconds_summ" comment="The time to wait (in seconds) in the reviewer before automatically showing the next question or answer">XXX s</string>
     <string name="timeout_question_seconds">Čas pro zobrazení další otázky</string>
     <string name="select_locale_title">Vyberte jazyk</string>
+    <string name="software_render">Zakázat hardwarové vykreslování karty</string>
+    <string name="software_render_summ">Hardwarové vykreslování je rychlejší, ale může způsobovat problémy, konkrétně na Android 8/8.1. Pokud nevidíte části uživatelského rozhraní pro opakování karet, zkuste toto nastavení.</string>
     <string name="safe_display">Režim bezpečného zobrazení</string>
     <string name="safe_display_summ">Zakázat všechny animace a použít bezpečnější metodu pro vykreslení karty. E-ink zařízení toto mohou vyžadovat.</string>
     <string name="disable_extended_text_ui">Zakázat režim úprav v jednom poli</string>
@@ -172,7 +174,8 @@
     <string name="learn_cutoff">Limit učení se napřed</string>
     <string name="time_limit">Časové omezení</string>
     <string name="time_limit_summ">XXX min</string>
-    <string name="day_offset">Začátek příštího dne</string>
+    <string name="new_timezone">New timezone handling</string>
+    <string name="day_offset_with_description">Začátek příštího dne (0 je půlnoc, 23 je 11 večer)</string>
     <string name="day_offset_summ">XXX hodin po půlnoci</string>
     <string name="sched_ver">Experimentální V2 plánovač</string>
     <string name="sched_ver_summ">Povolit experimentální plánovač. To vynutí změny v jednom směru při příští synchronizaci</string>
@@ -290,6 +293,10 @@
     <string name="analytics_summ">Můžete přispět do AnkiDroid tím, že pomůžete vývojovému týmu dozvědět se, které funkce lidé používají</string>
     <string name="note_editor_replace_newlines">Nahradit nové řádky HTML</string>
     <string name="note_editor_replace_newlines_summ">V editoru poznámek převede při úpravě karty každý výskyt &lt;br&gt; na nový řádek.</string>
-    <string name="no_code_formatting">Simple typed answer formatting</string>
-    <string name="no_code_formatting_summ">Fixes ‘􏿾’ appearing in typed answer results</string>
+    <string name="no_code_formatting">Jednoduché formátování napsané odpovědi</string>
+    <string name="no_code_formatting_summ">Opraví „􏿾“, které se vyskytuje ve výsledcích napsaných odpovědí</string>
+    <string name="type_in_answer_focus">Vybrat „napište odpověď“</string>
+    <string name="type_in_answer_focus_summ">Automaticky vybrat pole „napište odpověď“ při opakování</string>
+    <!-- Open Changelog-->
+    <string name="open_changelog">Otevřít seznam změn</string>
 </resources>

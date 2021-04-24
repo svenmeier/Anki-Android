@@ -36,6 +36,7 @@ import android.database.SQLException;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Message;
 import android.os.ParcelFileDescriptor;
@@ -79,17 +80,16 @@ import android.widget.Filterable;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import com.afollestad.materialdialogs.MaterialDialog;
-import com.getbase.floatingactionbutton.FloatingActionButton;
-import com.getbase.floatingactionbutton.FloatingActionsMenu;
 import com.ichi2.anki.CollectionHelper.CollectionIntegrityStorageCheck;
+import com.ichi2.anki.InitialActivity.StartupFailure;
 import com.ichi2.anki.StudyOptionsFragment.StudyOptionsListener;
 import com.ichi2.anki.analytics.UsageAnalytics;
 import com.ichi2.anki.dialogs.AsyncDialogFragment;
 import com.ichi2.anki.dialogs.ConfirmationDialog;
-import com.ichi2.anki.dialogs.CustomStudyDialog;
+import com.ichi2.anki.dialogs.CreateDeckDialog;
+import com.ichi2.anki.dialogs.customstudy.CustomStudyDialog;
 import com.ichi2.anki.dialogs.DatabaseErrorDialog;
 import com.ichi2.anki.dialogs.DeckPickerAnalyticsOptInDialog;
 import com.ichi2.anki.dialogs.DeckPickerBackupNoSpaceLeftDialog;
@@ -102,8 +102,10 @@ import com.ichi2.anki.dialogs.ExportDialog;
 import com.ichi2.anki.dialogs.ImportDialog;
 import com.ichi2.anki.dialogs.MediaCheckDialog;
 import com.ichi2.anki.dialogs.SyncErrorDialog;
+import com.ichi2.anki.dialogs.customstudy.CustomStudyDialogFactory;
 import com.ichi2.anki.exception.ConfirmModSchemaException;
 import com.ichi2.anki.exception.DeckRenameException;
+import com.ichi2.anki.exception.FilteredAncestor;
 import com.ichi2.anki.receiver.SdCardReceiver;
 import com.ichi2.anki.stats.AnkiStatsTaskHandler;
 import com.ichi2.anki.web.HostNumFactory;
@@ -123,7 +125,6 @@ import com.ichi2.libanki.Models;
 import com.ichi2.libanki.Utils;
 import com.ichi2.libanki.importer.AnkiPackageImporter;
 import com.ichi2.libanki.sched.AbstractDeckTreeNode;
-import com.ichi2.libanki.sched.DeckTreeNode;
 import com.ichi2.libanki.sync.CustomSyncServerUrlException;
 import com.ichi2.libanki.sync.Syncer;
 import com.ichi2.libanki.utils.TimeUtils;
@@ -144,8 +145,6 @@ import com.ichi2.utils.JSONException;
 
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.TreeMap;
@@ -174,7 +173,8 @@ public class DeckPicker extends NavigationDrawerActivity implements
     /**
      * Available options performed by other activities (request codes for onActivityResult())
      */
-    private static final int REQUEST_STORAGE_PERMISSION = 0;
+    @VisibleForTesting
+    static final int REQUEST_STORAGE_PERMISSION = 0;
     private static final int REQUEST_PATH_UPDATE = 1;
     public static final int REPORT_FEEDBACK = 4;
     private static final int LOG_IN_FOR_SYNC = 6;
@@ -193,6 +193,8 @@ public class DeckPicker extends NavigationDrawerActivity implements
     // Short animation duration from system
     private int mShortAnimDuration;
 
+    private boolean mBackButtonPressedToExit = false;
+
     private RelativeLayout mDeckPickerContent;
 
     private MaterialDialog mProgressDialog;
@@ -200,7 +202,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
     private RecyclerView mRecyclerView;
     private LinearLayoutManager mRecyclerViewLayoutManager;
     private DeckAdapter mDeckListAdapter;
-    private FloatingActionsMenu mActionsMenu;
+	
     private final Snackbar.Callback mSnackbarShowHideCallback = new Snackbar.Callback();
 
     private LinearLayout mNoDecksPlaceholder;
@@ -214,6 +216,8 @@ public class DeckPicker extends NavigationDrawerActivity implements
     private long mContextMenuDid;
 
     private EditText mDialogEditText;
+
+    private DeckPickerFloatingActionMenu mFloatingActionMenu;
 
     // flag asking user to do a full sync which is used in upgrade path
     private boolean mRecommendFullSync = false;
@@ -247,6 +251,8 @@ public class DeckPicker extends NavigationDrawerActivity implements
 
     private SearchView mToolbarSearchView;
 
+    private CustomStudyDialogFactory mCustomStudyDialogFactory;
+
     // ----------------------------------------------------------------------------
     // LISTENERS
     // ----------------------------------------------------------------------------
@@ -268,8 +274,8 @@ public class DeckPicker extends NavigationDrawerActivity implements
     private void onDeckClick(View v, DeckSelectionType selectionType) {
         long deckId = (long) v.getTag();
         Timber.i("DeckPicker:: Selected deck with id %d", deckId);
-        if (mActionsMenu != null && mActionsMenu.isExpanded()) {
-            mActionsMenu.collapse();
+        if (mFloatingActionMenu.isFABOpen()) {
+            mFloatingActionMenu.closeFloatingActionMenu();
         }
 
         boolean collectionIsOpen = false;
@@ -283,6 +289,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
             }
         } catch (Exception e) {
             // Maybe later don't report if collectionIsOpen is false?
+            Timber.w(e);
             String info = deckId + " colOpen:" + collectionIsOpen;
             AnkiDroidApp.sendExceptionReport(e, "deckPicker::onDeckClick", info);
             displayFailedToOpenDeck(deckId);
@@ -400,7 +407,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
 
         @Override
         public void actualOnPreExecute(@NonNull DeckPicker deckPicker) {
-            deckPicker.mProgressDialog = StyledProgressDialog.show(deckPicker, "",
+            deckPicker.mProgressDialog = StyledProgressDialog.show(deckPicker, null,
                     deckPicker.getResources().getString(R.string.export_in_progress), false);
         }
 
@@ -441,16 +448,15 @@ public class DeckPicker extends NavigationDrawerActivity implements
         if (showedActivityFailedScreen(savedInstanceState)) {
             return;
         }
-
-        SharedPreferences preferences = AnkiDroidApp.getSharedPrefs(getBaseContext());
+        
+        mCustomStudyDialogFactory = new CustomStudyDialogFactory(this::getCol, this).attachToActivity(this);
 
         //we need to restore here, as we need it before super.onCreate() is called.
         restoreWelcomeMessage(savedInstanceState);
-        // Open Collection on UI thread while splash screen is showing
-        boolean colOpen = firstCollectionOpen();
 
         // Then set theme and content view
         super.onCreate(savedInstanceState);
+        handleStartup();
         setContentView(R.layout.homescreen);
         View mainView = findViewById(android.R.id.content);
 
@@ -515,47 +521,60 @@ public class DeckPicker extends NavigationDrawerActivity implements
                 mPullToSyncWrapper.setEnabled(mRecyclerViewLayoutManager.findFirstCompletelyVisibleItemPosition() == 0));
 
         // Setup the FloatingActionButtons, should work everywhere with min API >= 15
-        mActionsMenu = findViewById(R.id.add_content_menu);
-        mActionsMenu.findViewById(R.id.fab_expand_menu_button).setContentDescription(getString(R.string.menu_add));
-        configureFloatingActionsMenu();
+        mFloatingActionMenu = new DeckPickerFloatingActionMenu(view, this);
 
         mReviewSummaryTextView = findViewById(R.id.today_stats_text_view);
-
-        Timber.i("colOpen: %b", colOpen);
-        if (colOpen) {
-            // Show any necessary dialogs (e.g. changelog, special messages, etc)
-            showStartupScreensAndDialogs(preferences, 0);
-        } else {
-            // Show error dialogs
-            if (Permissions.hasStorageAccessPermission(this)) {
-                if (!AnkiDroidApp.isSdCardMounted()) {
-                    Timber.i("SD card not mounted");
-                    onSdCardNotMounted();
-                } else if (!CollectionHelper.isCurrentAnkiDroidDirAccessible(this)) {
-                    Timber.i("AnkiDroid directory inaccessible");
-                    Intent i = Preferences.getPreferenceSubscreenIntent(this, "com.ichi2.anki.prefs.advanced");
-                    startActivityForResultWithoutAnimation(i, REQUEST_PATH_UPDATE);
-                    Toast.makeText(this, R.string.directory_inaccessible, Toast.LENGTH_LONG).show();
-                } else if (isFutureAnkiDroidVersion()) {
-                    Timber.i("Displaying database versioning");
-                    showDatabaseErrorDialog(DatabaseErrorDialog.INCOMPATIBLE_DB_VERSION);
-                } else {
-                    Timber.i("Displaying database error");
-                    showDatabaseErrorDialog(DatabaseErrorDialog.DIALOG_LOAD_FAILED);
-                }
-            }
-        }
 
         mShortAnimDuration = getResources().getInteger(android.R.integer.config_shortAnimTime);
     }
 
+    /**
+     * The first call in showing dialogs for startup - error or success.
+     * Attempts startup if storage permission has been acquired, else, it requests the permission
+     * */
+    private void handleStartup() {
+        if (Permissions.hasStorageAccessPermission(this)) {
+            boolean colOpen = firstCollectionOpen();
+            if (colOpen) {
+                // Show any necessary dialogs (e.g. changelog, special messages, etc)
+                SharedPreferences sharedPrefs = AnkiDroidApp.getSharedPrefs(this);
+                showStartupScreensAndDialogs(sharedPrefs, 0);
+            } else {
+                // Show error dialogs
+                StartupFailure failure = InitialActivity.getStartupFailureType(this);
+                handleStartupFailure(failure);
+            }
+        } else {
+            requestStoragePermission();
+        }
+    }
 
-    private boolean isFutureAnkiDroidVersion() {
-        try {
-            return CollectionHelper.isFutureAnkiDroidVersion(this);
-        } catch (Exception e) {
-            Timber.w(e, "Could not determine if future AnkiDroid version - assuming not");
-            return false;
+
+    @VisibleForTesting
+    void handleStartupFailure(StartupFailure failure) {
+        switch (failure) {
+            case SD_CARD_NOT_MOUNTED:
+                Timber.i("SD card not mounted");
+                onSdCardNotMounted();
+                break;
+            case DIRECTORY_NOT_ACCESSIBLE:
+                Timber.i("AnkiDroid directory inaccessible");
+                Intent i = Preferences.getPreferenceSubscreenIntent(this, "com.ichi2.anki.prefs.advanced");
+                startActivityForResultWithoutAnimation(i, REQUEST_PATH_UPDATE);
+                UIUtils.showThemedToast(this, R.string.directory_inaccessible, false);
+                break;
+            case FUTURE_ANKIDROID_VERSION:
+                Timber.i("Displaying database versioning");
+                showDatabaseErrorDialog(DatabaseErrorDialog.INCOMPATIBLE_DB_VERSION);
+                break;
+            case DATABASE_LOCKED:
+                Timber.i("Displaying database locked error");
+                showDatabaseErrorDialog(DatabaseErrorDialog.DIALOG_DB_LOCKED);
+                break;
+            case DB_ERROR:
+            default:
+                Timber.i("Displaying database error");
+                showDatabaseErrorDialog(DatabaseErrorDialog.DIALOG_LOAD_FAILED);
         }
     }
 
@@ -583,7 +602,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
     }
 
     /**
-     * Try to open the Collection for the first time, and do some error handling if it wasn't successful
+     * Try to open the Collection for the first time
      * @return whether or not we were successful
      */
     private boolean firstCollectionOpen() {
@@ -597,16 +616,16 @@ public class DeckPicker extends NavigationDrawerActivity implements
                     .show();
             return false;
         }
-        if (Permissions.hasStorageAccessPermission(this)) {
-            Timber.i("User has permissions to access collection");
-            // Show error dialog if collection could not be opened
-            return CollectionHelper.getInstance().getColSafe(this) != null;
-        } else if (mClosedWelcomeMessage) {
+
+        return CollectionHelper.getInstance().getColSafe(this) != null;
+    }
+
+    public void requestStoragePermission() {
+        if (mClosedWelcomeMessage) {
             // DEFECT #5847: This fails if the activity is killed.
             //Even if the dialog is showing, we want to show it again.
             ActivityCompat.requestPermissions(this, new String[] {Manifest.permission.WRITE_EXTERNAL_STORAGE},
                     REQUEST_STORAGE_PERMISSION);
-            return false;
         } else {
             Timber.i("Displaying initial permission request dialog");
             // Request storage permission if we don't have it (e.g. on Android 6.0+)
@@ -623,55 +642,24 @@ public class DeckPicker extends NavigationDrawerActivity implements
                     .cancelable(false)
                     .canceledOnTouchOutside(false)
                     .show();
-            return false;
         }
     }
 
-    private void configureFloatingActionsMenu() {
-        final FloatingActionButton addDeckButton = findViewById(R.id.add_deck_action);
-        final FloatingActionButton addSharedButton = findViewById(R.id.add_shared_action);
-        final FloatingActionButton addNoteButton = findViewById(R.id.add_note_action);
-        addDeckButton.setOnClickListener(view -> {
-            if (mActionsMenu == null) {
-                return;
-            }
-            mActionsMenu.collapse();
-            mDialogEditText = new FixedEditText(DeckPicker.this);
-            mDialogEditText.setSingleLine(true);
-            // mDialogEditText.setFilters(new InputFilter[] { mDeckNameFilter });
-            new MaterialDialog.Builder(DeckPicker.this)
-                    .title(R.string.new_deck)
-                    .positiveText(R.string.dialog_ok)
-                    .customView(mDialogEditText, true)
-                    .onPositive((dialog, which) -> {
-                        String deckName = mDialogEditText.getText().toString();
-                        if (Decks.isValidDeckName(deckName)) {
-                            createNewDeck(deckName);
-                        } else {
-                            Timber.i("configureFloatingActionsMenu::addDeckButton::onPositiveListener - Not creating invalid deck name '%s'", deckName);
-                            UIUtils.showThemedToast(this, getString(R.string.invalid_deck_name), false);
-                        }
-                    })
-                    .negativeText(R.string.dialog_cancel)
-                    .show();
-        });
-        addSharedButton.setOnClickListener(view -> {
-            Timber.i("Adding Shared Deck");
-            mActionsMenu.collapse();
-            addSharedDeck();
-        });
-        addNoteButton.setOnClickListener(view -> {
-            Timber.i("Adding Note");
-            mActionsMenu.collapse();
-            addNote();
-        });
-    }
-
-
-    private void createNewDeck(String deckName) {
+    /**
+     * It can fail if an ancestor is a filtered deck.
+     * @param deckName Create a deck with this name.
+     * @return Whether creation succeeded.
+     */
+    protected boolean createNewDeck(String deckName) {
         Timber.i("DeckPicker:: Creating new deck...");
-        getCol().getDecks().id(deckName, true);
+        try {
+            getCol().getDecks().id(deckName);
+        } catch (FilteredAncestor filteredAncestor) {
+            UIUtils.showThemedToast(this, getString(R.string.decks_rename_filtered_nosubdecks), false);
+            return false;
+        }
         updateDeckList();
+        return true;
     }
 
 
@@ -799,34 +787,12 @@ public class DeckPicker extends NavigationDrawerActivity implements
             showImportDialog(ImportDialog.DIALOG_IMPORT_HINT);
             return true;
         } else if (itemId == R.id.action_new_filtered_deck) {
-            Timber.i("DeckPicker:: New filtered deck button pressed");
-            mDialogEditText = new FixedEditText(DeckPicker.this);
-            ArrayList<String> names = getCol().getDecks().allNames();
-            int n = 1;
-            String name = String.format(Locale.getDefault(), "%s %d", res.getString(R.string.filtered_deck_name), n);
-            while (names.contains(name)) {
-                n++;
-                name = String.format(Locale.getDefault(), "%s %d", res.getString(R.string.filtered_deck_name), n);
-            }
-            mDialogEditText.setText(name);
-            // mDialogEditText.setFilters(new InputFilter[] { mDeckNameFilter });
-            new MaterialDialog.Builder(DeckPicker.this)
-                    .title(res.getString(R.string.new_deck))
-                    .customView(mDialogEditText, true)
-                    .positiveText(R.string.create)
-                    .negativeText(R.string.dialog_cancel)
-                    .onPositive((dialog, which) -> {
-                        String filteredDeckName = mDialogEditText.getText().toString();
-                        if (!Decks.isValidDeckName(filteredDeckName)) {
-                            Timber.i("Not creating deck with invalid name '%s'", filteredDeckName);
-                            UIUtils.showThemedToast(this, getString(R.string.invalid_deck_name), false);
-                            return;
-                        }
-                        Timber.i("DeckPicker:: Creating filtered deck...");
-                        getCol().getDecks().newDyn(filteredDeckName);
-                        openStudyOptions(true);
-                    })
-                    .show();
+            CreateDeckDialog createFilteredDeckDialog = new CreateDeckDialog(DeckPicker.this, R.string.new_deck, CreateDeckDialog.DeckDialogType.FILTERED_DECK, null);
+            createFilteredDeckDialog.setOnNewDeckCreated((id) -> {
+                // a filtered deck was created
+                openStudyOptions(true);
+            });
+            createFilteredDeckDialog.showFilteredDeckDialog();
             return true;
         } else if (itemId == R.id.action_check_database) {
             Timber.i("DeckPicker:: Check database button pressed");
@@ -843,7 +809,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
         } else if (itemId == R.id.action_model_browser_open) {
             Timber.i("DeckPicker:: Model browser button pressed");
             Intent noteTypeBrowser = new Intent(this, ModelBrowser.class);
-            startActivityForResultWithAnimation(noteTypeBrowser, 0, LEFT);
+            startActivityForResultWithAnimation(noteTypeBrowser, 0, START);
             return true;
         } else if (itemId == R.id.action_restore_backup) {
             Timber.i("DeckPicker:: Restore from backup button pressed");
@@ -885,16 +851,8 @@ public class DeckPicker extends NavigationDrawerActivity implements
                 }
             } else if (resultCode == Reviewer.RESULT_ABORT_AND_SYNC) {
                 Timber.i("Obtained Abort and Sync result");
-                CollectionTask.waitForAllToFinish(4);
+                TaskManager.waitForAllToFinish(4);
                 sync();
-            }
-        } else if (requestCode == REQUEST_BROWSE_CARDS) {
-            // Store the selected deck after opening browser
-            if (intent != null && intent.getBooleanExtra("allDecksSelected", false)) {
-                AnkiDroidApp.getSharedPrefs(this).edit().putLong("browserDeckIdFromDeckPicker", Decks.NOT_FOUND_DECK_ID).apply();
-            } else {
-                long selectedDeck = getCol().getDecks().selected();
-                AnkiDroidApp.getSharedPrefs(this).edit().putLong("browserDeckIdFromDeckPicker", selectedDeck).apply();
             }
         } else if (requestCode == REQUEST_PATH_UPDATE) {
             // The collection path was inaccessible on startup so just close the activity and let user restart
@@ -947,13 +905,14 @@ public class DeckPicker extends NavigationDrawerActivity implements
 
 
     public void onRequestPermissionsResult (int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_STORAGE_PERMISSION && permissions.length == 1) {
             if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 invalidateOptionsMenu();
-                showStartupScreensAndDialogs(AnkiDroidApp.getSharedPrefs(this), 0);
+                handleStartup();
             } else {
                 // User denied access to file storage  so show error toast and display "App Info"
-                Toast.makeText(this, R.string.startup_no_storage_permission, Toast.LENGTH_LONG).show();
+                UIUtils.showThemedToast(this, R.string.startup_no_storage_permission, false);
                 finishWithoutAnimation();
                 // Open the Android settings page for our app so that the user can grant the missing permission
                 Intent intent = new Intent();
@@ -996,6 +955,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
         super.onSaveInstanceState(savedInstanceState);
         savedInstanceState.putLong("mContextMenuDid", mContextMenuDid);
         savedInstanceState.putBoolean("mClosedWelcomeMessage", mClosedWelcomeMessage);
+        savedInstanceState.putBoolean("mIsFABOpen", mFloatingActionMenu.isFABOpen());
     }
 
 
@@ -1003,6 +963,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
     public void onRestoreInstanceState(Bundle savedInstanceState) {
         super.onRestoreInstanceState(savedInstanceState);
         mContextMenuDid = savedInstanceState.getLong("mContextMenuDid");
+        mFloatingActionMenu.setIsFABOpen(savedInstanceState.getBoolean("mIsFABOpen"));
     }
 
 
@@ -1059,11 +1020,16 @@ public class DeckPicker extends NavigationDrawerActivity implements
             super.onBackPressed();
         } else {
             Timber.i("Back key pressed");
-            if (mActionsMenu != null && mActionsMenu.isExpanded()) {
-                mActionsMenu.collapse();
+            if (mFloatingActionMenu.isFABOpen()) {
+                mFloatingActionMenu.closeFloatingActionMenu();
             } else {
-                automaticSync();
-                finishWithAnimation();
+                if (mBackButtonPressedToExit) {
+                    automaticSync();
+                    finishWithAnimation();
+                } else {
+                    UIUtils.showThemedToast(this, getString(R.string.back_pressed_once), true);
+                }
+                mBackButtonPressedToExit = true;
             }
         }
     }
@@ -1136,6 +1102,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
                 getCol().modSchema();
             } catch (ConfirmModSchemaException e) {
                 Timber.w("Forcing full sync");
+                e.log();
                 // If libanki determines it's necessary to confirm the full sync then show a confirmation dialog
                 // We have to show the dialog via the DialogHandler since this method is called via an async task
                 Resources res = getResources();
@@ -1162,11 +1129,22 @@ public class DeckPicker extends NavigationDrawerActivity implements
     public void addNote() {
         Intent intent = new Intent(DeckPicker.this, NoteEditor.class);
         intent.putExtra(NoteEditor.EXTRA_CALLER, NoteEditor.CALLER_DECKPICKER);
-        startActivityForResultWithAnimation(intent, ADD_NOTE, LEFT);
+        startActivityForResultWithAnimation(intent, ADD_NOTE, START);
     }
 
 
     private void showStartupScreensAndDialogs(SharedPreferences preferences, int skip) {
+
+        // For Android 8/8.1 we want to use software rendering by default or the Reviewer UI is broken #7369
+        if (CompatHelper.getSdkVersion() == Build.VERSION_CODES.O ||
+                CompatHelper.getSdkVersion() == Build.VERSION_CODES.O_MR1) {
+                if (!preferences.contains("softwareRender")) {
+                    Timber.i("Android 8/8.1 detected with no render preference. Turning on software render.");
+                    preferences.edit().putBoolean("softwareRender", true).apply();
+                } else {
+                    Timber.i("Android 8/8.1 detected, software render preference already exists.");
+                }
+        }
 
         if (!BackupManager.enoughDiscSpace(CollectionHelper.getCurrentAnkiDroidDirectory(this))) {
             Timber.i("Not enough space to do backup");
@@ -1183,7 +1161,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
             Timber.i("AnkiDroid is being updated and a collection already exists.");
             // The user might appreciate us now, see if they will help us get better?
             if (!preferences.contains(UsageAnalytics.ANALYTICS_OPTIN_KEY)) {
-                showDialogFragment(DeckPickerAnalyticsOptInDialog.newInstance());
+                displayAnalyticsOptInDialog();
             }
 
             // For upgrades, we check if we are upgrading
@@ -1301,7 +1279,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
 
                     if (skip != 0) {
                         startActivityForResultWithAnimation(infoIntent, SHOW_INFO_NEW_VERSION,
-                                LEFT);
+                                START);
                     } else {
                         startActivityForResultWithoutAnimation(infoIntent, SHOW_INFO_NEW_VERSION);
                     }
@@ -1321,15 +1299,23 @@ public class DeckPicker extends NavigationDrawerActivity implements
         }
     }
 
+    @VisibleForTesting
+    protected void displayAnalyticsOptInDialog() {
+        showDialogFragment(DeckPickerAnalyticsOptInDialog.newInstance());
+    }
+
+
     protected long getPreviousVersion(SharedPreferences preferences, long current) {
         long previous;
         try {
             previous = preferences.getLong(UPGRADE_VERSION_KEY, current);
         } catch (ClassCastException e) {
+            Timber.w(e);
             try {
                 // set 20900203 to default value, as it's the latest version that stores integer in shared prefs
                 previous = preferences.getInt(UPGRADE_VERSION_KEY, 20900203);
             } catch (ClassCastException cce) {
+                Timber.w(cce);
                 // Previous versions stored this as a string.
                 String s = preferences.getString(UPGRADE_VERSION_KEY, "");
                 // The last version of AnkiDroid that stored this as a string was 2.0.2.
@@ -1377,6 +1363,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
                 boolean old = preferences.getBoolean("fullscreenReview", false);
                 preferences.edit().putString("fullscreenMode", old ? "1": "0").apply();
             } catch (ClassCastException e) {
+                Timber.w(e);
                 // TODO:  can remove this catch as it was only here to fix an error in the betas
                 preferences.edit().remove("fullscreenMode").apply();
             }
@@ -1388,11 +1375,11 @@ public class DeckPicker extends NavigationDrawerActivity implements
         return new UndoTaskListener(isReview, this);
     }
     private static class UndoTaskListener extends TaskListenerWithContext<DeckPicker, Card, BooleanGetter> {
-        private final boolean isReview;
+        private final boolean mIsreview;
 
         public UndoTaskListener(boolean isReview, DeckPicker deckPicker) {
             super(deckPicker);
-            this.isReview = isReview;
+            this.mIsreview = isReview;
         }
 
 
@@ -1412,7 +1399,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
         public void actualOnPostExecute(@NonNull DeckPicker deckPicker, BooleanGetter voi) {
             deckPicker.hideProgressBar();
             Timber.i("Undo completed");
-            if (isReview) {
+            if (mIsreview) {
                 Timber.i("Review undone - opening reviewer.");
                 deckPicker.openReviewer();
             }
@@ -1548,7 +1535,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
 
         @Override
         public void actualOnPreExecute(@NonNull DeckPicker deckPicker) {
-            deckPicker.mProgressDialog = StyledProgressDialog.show(deckPicker, "",
+            deckPicker.mProgressDialog = StyledProgressDialog.show(deckPicker, null,
                     deckPicker.getResources().getString(R.string.backup_repair_deck_progress), false);
         }
 
@@ -1607,7 +1594,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
 
         @Override
         public void actualOnPreExecute(@NonNull DeckPicker deckPicker) {
-            deckPicker.mProgressDialog = StyledProgressDialog.show(deckPicker, "",
+            deckPicker.mProgressDialog = StyledProgressDialog.show(deckPicker, null,
                     deckPicker.getResources().getString(R.string.check_media_message), false);
         }
 
@@ -1641,7 +1628,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
 
         @Override
         public void actualOnPreExecute(@NonNull DeckPicker deckPicker) {
-            deckPicker.mProgressDialog = StyledProgressDialog.show(deckPicker, "",
+            deckPicker.mProgressDialog = StyledProgressDialog.show(deckPicker, null,
                     deckPicker.getResources().getString(R.string.delete_media_message), false);
         }
 
@@ -1723,10 +1710,10 @@ public class DeckPicker extends NavigationDrawerActivity implements
 
 
     private final Connection.TaskListener mSyncListener = new Connection.CancellableTaskListener() {
-        private String currentMessage;
-        private long countUp;
-        private long countDown;
-        private boolean dialogDisplayFailure = false;
+        private String mCurrentMessage;
+        private long mCountUp;
+        private long mCountDown;
+        private boolean mDialogDisplayFailure = false;
 
         @Override
         public void onDisconnected() {
@@ -1736,19 +1723,19 @@ public class DeckPicker extends NavigationDrawerActivity implements
         @Override
         public void onCancelled() {
             showSyncLogMessage(R.string.sync_cancelled, "");
-            if (!dialogDisplayFailure) {
+            if (!mDialogDisplayFailure) {
                 mProgressDialog.dismiss();
                 // update deck list in case sync was cancelled during media sync and main sync was actually successful
                 updateDeckList();
             }
             // reset our display failure fate, just in case it is re-used
-            dialogDisplayFailure = false;
+            mDialogDisplayFailure = false;
         }
 
         @Override
         public void onPreExecute() {
-            countUp = 0;
-            countDown = 0;
+            mCountUp = 0;
+            mCountDown = 0;
             final long syncStartTime = getCol().getTime().intTimeMS();
 
             if (mProgressDialog == null || !mProgressDialog.isShowing()) {
@@ -1756,12 +1743,12 @@ public class DeckPicker extends NavigationDrawerActivity implements
                     mProgressDialog = StyledProgressDialog
                             .show(DeckPicker.this, getResources().getString(R.string.sync_title),
                                     getResources().getString(R.string.sync_title) + "\n"
-                                            + getResources().getString(R.string.sync_up_down_size, countUp, countDown),
+                                            + getResources().getString(R.string.sync_up_down_size, mCountUp, mCountDown),
                                     false);
                 } catch (WindowManager.BadTokenException e) {
                     // If we could not show the progress dialog to start even, bail out - user will get a message
                     Timber.w(e, "Unable to display Sync progress dialog, Activity not valid?");
-                    dialogDisplayFailure = true;
+                    mDialogDisplayFailure = true;
                     Connection.cancel();
                     return;
                 }
@@ -1818,24 +1805,24 @@ public class DeckPicker extends NavigationDrawerActivity implements
             } else if (values[0] instanceof Integer) {
                 int id = (Integer) values[0];
                 if (id != 0) {
-                    currentMessage = res.getString(id);
+                    mCurrentMessage = res.getString(id);
                 }
                 if (values.length >= 3) {
-                    countUp = (Long) values[1];
-                    countDown = (Long) values[2];
+                    mCountUp = (Long) values[1];
+                    mCountDown = (Long) values[2];
                 }
             } else if (values[0] instanceof String) {
-                currentMessage = (String) values[0];
+                mCurrentMessage = (String) values[0];
                 if (values.length >= 3) {
-                    countUp = (Long) values[1];
-                    countDown = (Long) values[2];
+                    mCountUp = (Long) values[1];
+                    mCountDown = (Long) values[2];
                 }
             }
             if (mProgressDialog != null && mProgressDialog.isShowing()) {
                 // mProgressDialog.setTitle((String) values[0]);
-                mProgressDialog.setContent(currentMessage + "\n"
+                mProgressDialog.setContent(mCurrentMessage + "\n"
                         + res
-                        .getString(R.string.sync_up_down_size, countUp / 1024, countDown / 1024));
+                        .getString(R.string.sync_up_down_size, mCountUp / 1024, mCountDown / 1024));
             }
         }
 
@@ -2141,11 +2128,11 @@ public class DeckPicker extends NavigationDrawerActivity implements
         try {
             uri = FileProvider.getUriForFile(DeckPicker.this, "com.ichi2.anki.apkgfileprovider", attachment);
         } catch (IllegalArgumentException e) {
-            Timber.e("Could not generate a valid URI for the apkg file");
+            Timber.w(e, "Could not generate a valid URI for the apkg file");
             UIUtils.showThemedToast(this, getResources().getString(R.string.apk_share_error), false);
             return;
         }
-        Intent shareIntent = ShareCompat.IntentBuilder.from(DeckPicker.this)
+        Intent shareIntent = new ShareCompat.IntentBuilder(DeckPicker.this)
                 .setType("application/apkg")
                 .setStream(uri)
                 .setSubject(getString(R.string.export_email_subject, attachment.getName()))
@@ -2242,7 +2229,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
             Intent intent = new Intent();
             intent.putExtra("withDeckOptions", withDeckOptions);
             intent.setClass(this, StudyOptionsActivity.class);
-            startActivityForResultWithAnimation(intent, SHOW_STUDYOPTIONS, LEFT);
+            startActivityForResultWithAnimation(intent, SHOW_STUDYOPTIONS, START);
         }
     }
 
@@ -2293,7 +2280,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
         } else if (getCol().getSched().newDue() || getCol().getSched().revDue()) {
             // If there are no cards to review because of the daily study limit then give "Study more" option
             UIUtils.showSnackbar(this, R.string.studyoptions_limit_reached, false, R.string.study_more, v -> {
-                CustomStudyDialog d = CustomStudyDialog.newInstance(
+                CustomStudyDialog d = mCustomStudyDialogFactory.newCustomStudyDialog().withArguments(
                         CustomStudyDialog.CONTEXT_MENU_LIMITS,
                         getCol().getDecks().selected(), true);
                 showDialogFragment(d);
@@ -2324,7 +2311,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
         } else {
             // Otherwise say there are no cards scheduled to study, and give option to do custom study
             UIUtils.showSnackbar(this, R.string.studyoptions_empty_schedule, false, R.string.custom_study, v -> {
-                CustomStudyDialog d = CustomStudyDialog.newInstance(
+                CustomStudyDialog d = mCustomStudyDialogFactory.newCustomStudyDialog().withArguments(
                         CustomStudyDialog.CONTEXT_MENU_EMPTY_SCHEDULE,
                         getCol().getDecks().selected(), true);
                 showDialogFragment(d);
@@ -2399,7 +2386,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
      *
      * This method also triggers an update for the widget to reflect the newly calculated counts.
      */
-    private void updateDeckList() {
+    protected void updateDeckList() {
         updateDeckList(false);
     }
 
@@ -2584,6 +2571,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
                 UIUtils.showThemedToast(this, getString(R.string.create_shortcut_failed), false);
             }
         } catch (Exception e) {
+            Timber.w(e);
             UIUtils.showThemedToast(this, getString(R.string.create_shortcut_error, e.getLocalizedMessage()), false);
         }
     }
@@ -2595,39 +2583,18 @@ public class DeckPicker extends NavigationDrawerActivity implements
 
     public void renameDeckDialog(final long did) {
         final Resources res = getResources();
-        mDialogEditText = new FixedEditText(DeckPicker.this);
-        mDialogEditText.setSingleLine();
         final String currentName = getCol().getDecks().name(did);
-        mDialogEditText.setText(currentName);
-        mDialogEditText.setSelection(mDialogEditText.getText().length());
-        new MaterialDialog.Builder(DeckPicker.this)
-                .title(res.getString(R.string.rename_deck))
-                .customView(mDialogEditText, true)
-                .positiveText(R.string.rename)
-                .negativeText(R.string.dialog_cancel)
-                .onPositive((dialog, which) -> {
-                    String newName = mDialogEditText.getText().toString().replaceAll("\"", "");
-                    Collection col = getCol();
-                    if (!Decks.isValidDeckName(newName)) {
-                        Timber.i("renameDeckDialog not renaming deck to invalid name '%s'", newName);
-                        UIUtils.showThemedToast(this, getString(R.string.invalid_deck_name), false);
-                    } else if (!newName.equals(currentName)) {
-                        try {
-                            col.getDecks().rename(col.getDecks().get(did), newName);
-                        } catch (DeckRenameException e) {
-                            // We get a localized string from libanki to explain the error
-                            UIUtils.showThemedToast(DeckPicker.this, e.getLocalizedMessage(res), false);
-                        }
-                    }
-                    dismissAllDialogFragments();
-                    mDeckListAdapter.notifyDataSetChanged();
-                    updateDeckList();
-                    if (mFragmented) {
-                        loadStudyOptionsFragment(false);
-                    }
-                })
-                .onNegative((dialog, which) -> dismissAllDialogFragments())
-                .build().show();
+        CreateDeckDialog createDeckDialog = new CreateDeckDialog(DeckPicker.this, R.string.rename_deck, CreateDeckDialog.DeckDialogType.RENAME_DECK, null);
+        createDeckDialog.setDeckName(currentName);
+        createDeckDialog.setOnNewDeckCreated((id) -> {
+            dismissAllDialogFragments();
+            mDeckListAdapter.notifyDataSetChanged();
+            updateDeckList();
+            if (mFragmented) {
+                loadStudyOptionsFragment(false);
+            }
+        });
+        createDeckDialog.showDialog();
     }
 
 
@@ -2687,22 +2654,22 @@ public class DeckPicker extends NavigationDrawerActivity implements
         return new DeleteDeckListener(did, this);
     }
     private static class DeleteDeckListener extends TaskListenerWithContext<DeckPicker, Void, int[]>{
-        private final long did;
+        private final long mDid;
         // Flag to indicate if the deck being deleted is the current deck.
-        private boolean removingCurrent;
+        private boolean mRemovingCurrent;
 
         public DeleteDeckListener(long did, DeckPicker deckPicker) {
             super(deckPicker);
-            this.did = did;
+            this.mDid = did;
         }
 
 
         @Override
         public void actualOnPreExecute(@NonNull DeckPicker deckPicker) {
-            deckPicker.mProgressDialog = StyledProgressDialog.show(deckPicker, "",
+            deckPicker.mProgressDialog = StyledProgressDialog.show(deckPicker, null,
                     deckPicker.getResources().getString(R.string.delete_deck), false);
-            if (did == deckPicker.getCol().getDecks().current().optLong("id")) {
-                removingCurrent = true;
+            if (mDid == deckPicker.getCol().getDecks().current().optLong("id")) {
+                mRemovingCurrent = true;
             }
         }
 
@@ -2712,7 +2679,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
             // In fragmented mode, if the deleted deck was the current deck, we need to reload
             // the study options fragment with a valid deck and re-center the deck list to the
             // new current deck. Otherwise we just update the list normally.
-            if (deckPicker.mFragmented && removingCurrent) {
+            if (deckPicker.mFragmented && mRemovingCurrent) {
                 deckPicker.updateDeckList();
                 deckPicker.openStudyOptions(false);
             } else {
@@ -2735,7 +2702,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
     private SimpleProgressListener simpleProgressListener() {
         return new SimpleProgressListener(this);
     }
-    private static class SimpleProgressListener extends TaskListenerWithContext<DeckPicker, Void, int[]>{
+    private static class SimpleProgressListener extends TaskListenerWithContext<DeckPicker, Void, StudyOptionsFragment.DeckStudyData>{
         public SimpleProgressListener (DeckPicker deckPicker) {
             super(deckPicker);
         }
@@ -2747,7 +2714,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
 
 
         @Override
-        public void actualOnPostExecute(@NonNull DeckPicker deckPicker, int[] stats) {
+        public void actualOnPostExecute(@NonNull DeckPicker deckPicker, StudyOptionsFragment.DeckStudyData stats) {
             deckPicker.updateDeckList();
             if (deckPicker.mFragmented) {
                 deckPicker.loadStudyOptionsFragment(false);
@@ -2784,7 +2751,7 @@ public class DeckPicker extends NavigationDrawerActivity implements
 
     private void openReviewer() {
         Intent reviewer = new Intent(this, Reviewer.class);
-        startActivityForResultWithAnimation(reviewer, REQUEST_REVIEW, LEFT);
+        startActivityForResultWithAnimation(reviewer, REQUEST_REVIEW, START);
     }
 
     @Override
@@ -2898,33 +2865,16 @@ public class DeckPicker extends NavigationDrawerActivity implements
 
 
     private void createSubDeckDialog(long did) {
-        final Resources res = getResources();
-        mDialogEditText = new FixedEditText(this);
-        mDialogEditText.setSingleLine();
-        mDialogEditText.setSelection(mDialogEditText.getText().length());
-        new MaterialDialog.Builder(DeckPicker.this)
-                .title(R.string.create_subdeck)
-                .customView(mDialogEditText, true)
-                .positiveText(R.string.dialog_ok)
-                .negativeText(R.string.dialog_cancel)
-                .onPositive((dialog, which) -> {
-                    String textValue = mDialogEditText.getText().toString();
-                    String newName = getCol().getDecks().getSubdeckName(did, textValue);
-                    if (Decks.isValidDeckName(newName)) {
-                        createNewDeck(newName);
-                    } else {
-                        Timber.i("createSubDeckDialog - not creating invalid subdeck name '%s'", newName);
-                        UIUtils.showThemedToast(this, getString(R.string.invalid_deck_name), false);
-                    }
-                    dismissAllDialogFragments();
-                    mDeckListAdapter.notifyDataSetChanged();
-                    updateDeckList();
-                    if (mFragmented) {
-                        loadStudyOptionsFragment(false);
-                    }
-                })
-                .onNegative((dialog, which) -> dismissAllDialogFragments())
-                .build().show();
+        CreateDeckDialog createDeckDialog = new CreateDeckDialog(DeckPicker.this, R.string.create_subdeck, CreateDeckDialog.DeckDialogType.SUB_DECK, did);
+        createDeckDialog.setOnNewDeckCreated((i) -> {
+            // a deck was created
+            mDeckListAdapter.notifyDataSetChanged();
+            updateDeckList();
+            if (mFragmented) {
+                loadStudyOptionsFragment(false);
+            }
+        });
+        createDeckDialog.showDialog();
     }
 
 

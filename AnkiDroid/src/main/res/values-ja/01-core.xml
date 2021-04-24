@@ -111,12 +111,12 @@
     <string name="menu_edit_tags">タグを編集</string>
     <string name="delete_note_message">このカードの元となるノートを削除してもよろしいですか？　同じノートから作られたカード（例：裏表反転カード）があれば、それらも全て削除されます。\n%s</string>
     <string name="menu_select">テキストを選択</string>
+    <string name="menu_lookup">Lookup text</string>
     <string name="menu_search">%1$s で検索</string>
     <string name="menu_mark_note">ノートにマークを付ける</string>
     <string name="menu_unmark_note">ノートのマークをはずす</string>
     <string name="menu_toggle_mic_tool_bar">録音用マイクアイコン</string>
     <string name="new_deck">デッキを新規作成</string>
-    <string name="create" comment="Button to create a filtered deck">新規作成</string>
     <string name="new_dynamic_deck">フィルターデッキを作成</string>
     <string name="night_mode">ナイトモード</string>
     <string name="directory_inaccessible">AnkiDroid ディレクトリにアクセスできません</string>
@@ -149,6 +149,7 @@
     <string name="custom_study_deck_name">カスタム学習セッション</string>
     <string name="custom_study_deck_exists">最初に、既存のカスタム学習デッキの名前を変更してください</string>
     <string name="empty_deck">このデッキにはカードがありません</string>
+    <string name="search_deck">Deck Search</string>
     <string name="empty_deck_add_note">カードの追加</string>
     <string name="invalid_deck_name">無効なデッキ名です。</string>
     <string name="studyoptions_empty">このデッキにはカードが入っていません。「＋」ボタンをタップしてカードを追加してください。</string>
@@ -196,12 +197,12 @@
     <!-- Context Menu -->
     <string name="card_browser_context_menu" comment="The value which appears in the system context menu. Note the casing difference">AnkiDroid検索</string>
     <string name="context_menu_anki_card_label">Ankiカード</string>
-    <string name="has_a_problem" comment="First field is either front template or back template. Second field is the error message.">%1$s has a problem:<br/>%2$s</string>
-    <string name="more_information">More information</string>
-    <string name="no_field">Found \'{{%1$s}}\', but there is no field called \'%1$s\'.</string>
-    <string name="closed_tag_not_open">Found \'{{/%1$s}}\', but missing \'{{#%1$s}}\' or \'{{^%1$s}}\'.</string>
+    <string name="has_a_problem" comment="First field is either front template or back template. Second field is the error message.">%1$s に問題があります:<br/>%2$s</string>
+    <string name="more_information">詳細</string>
+    <string name="no_field">\'{{%1$s}}\' は見つかりましたが、\'%1$s\' というフィールドはありません。</string>
+    <string name="closed_tag_not_open">{{/%1$s}}\'は見つかりましたが、{{#%1$s}}\'または{{^%1$s }}\'がありません。</string>
     <string name="missing_closing_bracket">Missing \'}}\' in \'%s\'.</string>
     <string name="open_tag_not_closed">Missing \'{{%s}}\'.</string>
     <string name="wrong_tag_closed">Found \'{{/%1$s}}\', but expected \'{{/%2$s}}\'</string>
-    <string name="filter_error">Error in filter %s</string>
+    <string name="filter_error">フィルター %s にエラーがあります</string>
 </resources>

@@ -121,6 +121,7 @@ public class BackupManager {
                 lastBackupDate = df.parse(deckBackups[len].getName().replaceAll(
                         "^.*-(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}).colpkg$", "$1"));
             } catch (ParseException e) {
+                Timber.w(e);
                 lastBackupDate = null;
             }
         }
@@ -185,7 +186,7 @@ public class BackupManager {
                     }
                     Timber.i("Backup created succesfully");
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    Timber.w(e);
                 }
             }
         };

@@ -152,6 +152,8 @@
     <string name="timeout_answer_seconds_summ" comment="The time to wait (in seconds) in the reviewer before automatically showing the next question or answer">XXX s</string>
     <string name="timeout_question_seconds">Čas do zobrazenia ďalšej otázky</string>
     <string name="select_locale_title">Zvoliť jazyk</string>
+    <string name="software_render">Disable card hardware render</string>
+    <string name="software_render_summ">Hardware render is faster but may have problems, specifically on Android 8/8.1. If you cannot see parts of the card review user interface, try this setting.</string>
     <string name="safe_display">Režim bezpečného zobrazenia</string>
     <string name="safe_display_summ">Vypnuť všetky animácie a použiť bezpečnejšiu metódu na ťahanie kartičiek. Toto môže byť vyžadované E-ink zariadeniami.</string>
     <string name="disable_extended_text_ui">Vypnúť mód editácie jedného poľa</string>
@@ -173,7 +175,8 @@
     <string name="learn_cutoff">Limit pre učenie sa dopredu</string>
     <string name="time_limit">Hodnota časového limitu</string>
     <string name="time_limit_summ">XXX min</string>
-    <string name="day_offset">Začiatok ďalšieho dňa</string>
+    <string name="new_timezone">New timezone handling</string>
+    <string name="day_offset_with_description">Start of next day (0 is midnight, 23 is 11PM)</string>
     <string name="day_offset_summ">Počet hodín po polnoci: XXX</string>
     <string name="sched_ver">Experimentálny V2 plánovač</string>
     <string name="sched_ver_summ">Povoliť experimentálny plánovač. Vyžaduje si zmeny v jednom smere pri ďalej synchronizácii</string>
@@ -293,4 +296,8 @@
     <string name="note_editor_replace_newlines_summ">Premeniť v editore poznámok každý prípad &lt;br&gt; do nového riadku pri editácii kartičky.</string>
     <string name="no_code_formatting">Simple typed answer formatting</string>
     <string name="no_code_formatting_summ">Fixes ‘􏿾’ appearing in typed answer results</string>
+    <string name="type_in_answer_focus">Focus ‘type in answer’</string>
+    <string name="type_in_answer_focus_summ">Automatically focus the ‘type in answer’ field in the reviewer</string>
+    <!-- Open Changelog-->
+    <string name="open_changelog">Open Changelog</string>
 </resources>

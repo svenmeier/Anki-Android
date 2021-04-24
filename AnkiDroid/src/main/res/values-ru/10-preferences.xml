@@ -151,6 +151,8 @@
     <string name="timeout_answer_seconds_summ" comment="The time to wait (in seconds) in the reviewer before automatically showing the next question or answer">XXX с</string>
     <string name="timeout_question_seconds">Показать следующий вопрос через</string>
     <string name="select_locale_title">Выберите язык</string>
+    <string name="software_render">Отключить аппаратную отрисовку карточек</string>
+    <string name="software_render_summ">Аппаратная отрисовка быстрее, но может вызывать проблемы (особенно на Android 8/8.1). Попробуйте отключить её если при повторении пропадают элементы интерфейса.</string>
     <string name="safe_display">Статический режим экрана</string>
     <string name="safe_display_summ">Отключает всю анимацию и использует безопасную отрисовку. Может понадобиться для экранов на электронных чернилах</string>
     <string name="disable_extended_text_ui">Отключить режим одного поля</string>
@@ -172,7 +174,8 @@
     <string name="learn_cutoff">Лимит опережения</string>
     <string name="time_limit">Лимит учебного блока</string>
     <string name="time_limit_summ">XXX мин.</string>
-    <string name="day_offset">Начало следующего дня</string>
+    <string name="new_timezone">Обработка нового часового пояса</string>
+    <string name="day_offset_with_description">Начало следующего дня (0 — полночь, 23 — 11 вечера)</string>
     <string name="day_offset_summ">XXX ч. утра</string>
     <string name="sched_ver">Экспериментальный планировщик — 2</string>
     <string name="sched_ver_summ">Включает экспериментальный планировщик. При синхронизации изменения будут перезаписаны в одну сторону</string>
@@ -292,4 +295,8 @@
     <string name="note_editor_replace_newlines_summ">Заменять &lt;br&gt; в редакторе записей на перенос строки</string>
     <string name="no_code_formatting">Простое форматирование ответа</string>
     <string name="no_code_formatting_summ">Исправляет «􏿾» при вводе ответа</string>
+    <string name="type_in_answer_focus">Переключать на «Ввести ответ»</string>
+    <string name="type_in_answer_focus_summ">При повторении автоматически переходит к полю «Ввести ответ»</string>
+    <!-- Open Changelog-->
+    <string name="open_changelog">Показать список изменений</string>
 </resources>

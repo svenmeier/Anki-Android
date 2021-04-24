@@ -18,10 +18,7 @@
 
 package com.ichi2.libanki;
 
-import android.text.Html;
-
 import com.ichi2.utils.HtmlUtils;
-import com.ichi2.utils.JSONObject;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -47,11 +44,11 @@ public class LaTeX {
     /**
      * Patterns used to identify LaTeX tags
      */
-    public static final Pattern sStandardPattern = Pattern.compile("\\[latex](.+?)\\[/latex]",
+    public static final Pattern STANDARD_PATTERN = Pattern.compile("\\[latex](.+?)\\[/latex]",
             Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
-    public static final Pattern sExpressionPattern = Pattern.compile("\\[\\$](.+?)\\[/\\$]",
+    public static final Pattern EXPRESSION_PATTERN = Pattern.compile("\\[\\$](.+?)\\[/\\$]",
             Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
-    public static final Pattern sMathPattern = Pattern.compile("\\[\\$\\$](.+?)\\[/\\$\\$]",
+    public static final Pattern MATH_PATTERN = Pattern.compile("\\[\\$\\$](.+?)\\[/\\$\\$]",
             Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
 
 
@@ -60,22 +57,27 @@ public class LaTeX {
      * NOTE: _imgLink produces an alphanumeric filename so there is no need to escape the replacement string.
      */
     public static String mungeQA(String html, Collection col, Model model) {
+        return mungeQA(html, col.getMedia(), model);
+    }
+
+    // It's only goal is to allow testing with a different media manager.
+    @VisibleForTesting
+    public static String mungeQA(String html, Media m, Model model) {
         StringBuffer sb = new StringBuffer();
-        Matcher matcher = sStandardPattern.matcher(html);
-        Media m = col.getMedia();
+        Matcher matcher = STANDARD_PATTERN.matcher(html);
         while (matcher.find()) {
             matcher.appendReplacement(sb, _imgLink(matcher.group(1), model, m));
         }
         matcher.appendTail(sb);
 
-        matcher = sExpressionPattern.matcher(sb.toString());
+        matcher = EXPRESSION_PATTERN.matcher(sb.toString());
         sb = new StringBuffer();
         while (matcher.find()) {
             matcher.appendReplacement(sb, _imgLink("$" + matcher.group(1) + "$", model, m));
         }
         matcher.appendTail(sb);
 
-        matcher = sMathPattern.matcher(sb.toString());
+        matcher = MATH_PATTERN.matcher(sb.toString());
         sb = new StringBuffer();
         while (matcher.find()) {
             matcher.appendReplacement(sb,
@@ -101,7 +103,7 @@ public class LaTeX {
 
         String fname = "latex-" + Utils.checksum(txt) + "." + ext;
         if (m.have(fname)) {
-            return "<img class=latex alt=\"" + HtmlUtils.escape(latex) + "\" src=\"" + fname + "\">";
+            return Matcher.quoteReplacement("<img class=latex alt=\"" + HtmlUtils.escape(latex) + "\" src=\"" + fname + "\">");
         } else {
             return Matcher.quoteReplacement(latex);
         }
